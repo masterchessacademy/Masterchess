@@ -1,0 +1,420 @@
+index.html.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Online Real-time PvP Chess — WORKING!</title>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css" />
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin:0; padding:20px; background:#f7f7f8; color:#111; display:flex; flex-direction:column; align-items:center; }
+  .top { display:flex; gap:20px; align-items:center; width:100%; max-width:1100px; }
+  #controls { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  #boardWrap { margin-top:18px; display:flex; gap:20px; align-items:flex-start; flex-wrap: wrap; justify-content: center;}
+  #board { width:100%; max-width:520px; box-shadow: 0 6px 20px rgba(0,0,0,0.08); border-radius:6px; background:white; padding:12px; }
+  #sidebar { width:100%; max-width:430px; margin-top: 10px; background:white; padding:12px; border-radius:6px; box-shadow: 0 6px 20px rgba(0,0,0,0.06); }
+  #moves { height:420px; overflow:auto; border:1px solid #eee; padding:8px; background:#fff; }
+  .clock { font-size:22px; font-weight:600; margin-bottom:6px; }
+  .playerLabel { font-size:12px; color:#666; }
+  button, select, input { padding:8px 10px; font-size:14px; border-radius:6px; border:1px solid #ddd; background:#fff; cursor:pointer; }
+  button:disabled { cursor: not-allowed; background-color: #f0f0f0; }
+  .small { font-size:13px; padding:6px 8px; }
+  #gameLink { width:100%; padding:8px; border-radius:6px; border:1px solid #eee; }
+  .moveRow { padding:4px 0; border-bottom:1px dashed #f0f0f0; }
+  .controlsRow { margin-bottom:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  #status { margin-top:8px; color:#333; font-weight:600; min-height: 20px; }
+  
+  /* --- STYLES FOR VISUAL FEEDBACK --- */
+  .highlight-last-move { background-color: rgba(255, 255, 0, 0.5); }
+  .legal-move-hint { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 30%; height: 30%; border-radius: 50%; background-color: rgba(0, 0, 0, 0.2); pointer-events: none; }
+  #chessboardContainer .square-55d63 { position: relative; }
+</style>
+</head>
+<body>
+
+<h1>Online PvP Chess — WORKING!</h1>
+
+<div class="top">
+  <div id="controls">
+    My Color:
+    <select id="colorSelect" class="small"><option value="w">White</option><option value="b">Black</option><option value="random">Random</option></select>
+    Time control:
+    <select id="timePreset" class="small">
+      <option value="300:0">5 | 0 Blitz</option>
+      <option value="180:2">3 | 2 Blitz</option>
+      <option value="600:5">10 | 5 Rapid</option>
+      <option value="60:0">1 | 0 Bullet</option>
+      <option value="0:0">Unlimited</option>
+    </select>
+    <button id="newGameBtn">New Game</button>
+    <button id="joinBtn" class="small">Join Game</button>
+    <button id="exportPgn" class="small">Export PGN</button>
+  </div>
+</div>
+
+<div id="boardWrap">
+  <div id="board">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+      <div>
+        <div id="whitePlayerLabel" class="playerLabel">White</div>
+        <div id="whiteClock" class="clock">00:00</div>
+      </div>
+      <div>
+        <div id="blackPlayerLabel" class="playerLabel">Black</div>
+        <div id="blackClock" class="clock">00:00</div>
+      </div>
+    </div>
+    <div id="chessboardContainer"></div>
+    <div id="status">Welcome! Create or join a game to start.</div>
+  </div>
+
+  <div id="sidebar">
+    <div class="controlsRow">
+      <input id="gameLink" readonly placeholder="Create a new game to get a link" />
+      <button id="copyLink" class="small">Copy Link</button>
+    </div>
+    <div style="margin-bottom:8px;">
+      <strong>Moves</strong>
+      <div id="moves"></div>
+    </div>
+    <div>
+      <strong>Game Info</strong>
+      <div id="info"></div>
+    </div>
+  </div>
+</div>
+<audio id="moveSound" src="https://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/move-self.mp3" preload="auto"></audio>
+
+<!-- Libraries -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/1.0.0-beta.6/chess.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+
+<script>
+// --- YOUR FIREBASE CONFIGURATION HAS BEEN ADDED HERE ---
+const firebaseConfig = {
+  apiKey: "AIzaSyAS4EfrFCH1TE-J-N-rhXHQK5JHhUhuBxU",
+  authDomain: "masterchess-df965.firebaseapp.com",
+  databaseURL: "https://masterchess-df965-default-rtdb.firebaseio.com",
+  projectId: "masterchess-df965",
+  storageBucket: "masterchess-df965.firebasestorage.app",
+  messagingSenderId: "362016430477",
+  appId: "1:362016430477:web:50ec73614affda8177c5c4",
+  measurementId: "G-GP4LB03ZW1"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// The rest of the script logic
+const game = new Chess();
+let board;
+let playerColor = 'w';
+let gameId = null;
+let gameRef = null;
+let clockInterval = null;
+let isGameOver = false;
+
+const colorSelect = document.getElementById('colorSelect');
+const newGameBtn = document.getElementById('newGameBtn');
+const joinBtn = document.getElementById('joinBtn');
+const timePreset = document.getElementById('timePreset');
+const gameLinkInput = document.getElementById('gameLink');
+const copyLinkBtn = document.getElementById('copyLink');
+const movesEl = document.getElementById('moves');
+const whiteClockEl = document.getElementById('whiteClock');
+const blackClockEl = document.getElementById('blackClock');
+const statusEl = document.getElementById('status');
+const exportPgnBtn = document.getElementById('exportPgn');
+const infoEl = document.getElementById('info');
+const moveSound = document.getElementById('moveSound');
+
+function initBoard() {
+  board = Chessboard('chessboardContainer', {
+    draggable: true,
+    position: 'start',
+    pieceTheme: 'https://chessboardjs.com/img/chesspieces/cburnett/{piece}.svg', 
+    onDragStart: (source, piece) => {
+      if (isGameOver || game.turn() !== playerColor || !piece.startsWith(playerColor)) {
+        return false;
+      }
+      showLegalMoves(source);
+    },
+    onDrop: (source, target) => {
+      clearLegalMoves();
+      const isPromotion = (game.get(source)?.type === 'p') && ((playerColor === 'w' && source[1] === '7' && target[1] === '8') || (playerColor === 'b' && source[1] === '2' && target[1] === '1'));
+      let promotion = 'q';
+      if (isPromotion) {
+        let p = prompt("Promote pawn to (q, r, b, n):", "q");
+        if (p && 'qrbn'.includes(p.toLowerCase())) {
+          promotion = p.toLowerCase();
+        }
+      }
+      try {
+        const move = game.move({ from: source, to: target, promotion: promotion });
+        if (move === null) return 'snapback';
+        pushMoveToFirebase(move);
+      } catch (err) { return 'snapback'; }
+    },
+    onSnapEnd: () => board.position(game.fen())
+  });
+}
+
+function createNewGame() {
+  let selectedColor = colorSelect.value;
+  if (selectedColor === 'random') {
+    selectedColor = Math.random() < 0.5 ? 'w' : 'b';
+  }
+  playerColor = selectedColor;
+  
+  const preset = timePreset.value.split(':');
+  const seconds = parseInt(preset[0], 10);
+  const increment = parseInt(preset[1], 10);
+  
+  game.reset();
+  isGameOver = false;
+
+  gameId = Math.random().toString(36).substring(2, 9);
+  gameRef = db.ref('games/' + gameId);
+  
+  const initialData = {
+    fen: game.fen(), pgn: game.pgn(), turn: 'w', owner: playerColor,
+    time: { w: seconds, b: seconds }, inc: increment,
+    lastMoveTs: Date.now(), status: 'waiting'
+  };
+  
+  gameRef.set(initialData);
+  joinExistingGame(gameId);
+}
+
+function joinExistingGame(id) {
+  gameId = id.trim();
+  gameRef = db.ref('games/' + gameId);
+  
+  gameRef.once('value', snapshot => {
+    if (!snapshot.exists()) { return alert("Game not found!"); }
+    const data = snapshot.val();
+    const isOwner = colorSelect.value === data.owner;
+
+    if (data.status === 'waiting' && !isOwner) {
+       playerColor = data.owner === 'w' ? 'b' : 'w';
+       gameRef.update({ status: 'active' });
+    } else { playerColor = isOwner ? data.owner : (data.owner === 'w' ? 'b' : 'w'); }
+    
+    setURLHash(gameId);
+    listenToGame();
+    toggleControls(true);
+  });
+}
+
+function listenToGame() {
+    if (!gameRef) return;
+    gameRef.on('value', snapshot => {
+        const data = snapshot.val();
+        if (!data) return;
+
+        if (data.fen !== game.fen()) {
+            game.load(data.fen);
+            board.position(data.fen);
+            moveSound.play();
+            highlightLastMove();
+        }
+        
+        board.orientation(playerColor === 'w' ? 'white' : 'black');
+        updateUI(data);
+        handleClock(data);
+    });
+}
+
+async function pushMoveToFirebase(move) {
+  if (!gameRef) return;
+  
+  const snap = await gameRef.once('value');
+  const data = snap.val();
+  const now = Date.now();
+  const elapsed = Math.round((now - data.lastMoveTs) / 1000);
+
+  const newTime = { ...data.time };
+  if (data.turn === 'w') {
+      newTime.w = Math.max(0, newTime.w - elapsed + data.inc);
+  } else {
+      newTime.b = Math.max(0, newTime.b - elapsed + data.inc);
+  }
+
+  await gameRef.update({
+    fen: game.fen(), pgn: game.pgn(), turn: game.turn(),
+    time: newTime, lastMoveTs: now,
+  });
+}
+
+function updateUI(data) {
+  updateStatus(data);
+  updateMoves(data.pgn);
+  updateInfo();
+}
+
+function updateStatus(data) {
+    let statusText = '';
+    if (data.status === 'timeout') {
+        isGameOver = true;
+        statusText = `Time out! ${game.turn() === 'b' ? 'White' : 'Black'} wins.`;
+    } else if (data.status === 'waiting') {
+        statusText = 'Waiting for opponent...';
+    } else if (game.isGameOver()) {
+        isGameOver = true;
+        statusText = getGameOverReason();
+    } else {
+        isGameOver = false;
+        statusText = (game.turn() === 'w' ? 'White' : 'Black') + ' to move';
+        if (game.isCheck()) statusText += ' (in check)';
+    }
+    
+    if (isGameOver && clockInterval) clearInterval(clockInterval);
+    statusEl.innerText = statusText;
+}
+
+function getGameOverReason() {
+    if (game.isCheckmate()) return `Checkmate! ${game.turn() === 'w' ? 'Black' : 'White'} wins.`;
+    if (game.isStalemate()) return 'Draw by Stalemate.';
+    if (game.isThreefoldRepetition()) return 'Draw by Threefold Repetition.';
+    if (game.isInsufficientMaterial()) return 'Draw by Insufficient Material.';
+    return 'Game Over.';
+}
+
+function updateMoves(pgn) {
+    const tempGame = new Chess();
+    if (pgn) tempGame.loadPgn(pgn);
+    const movesArray = tempGame.history();
+    movesEl.innerHTML = '';
+    for (let i = 0; i < movesArray.length; i += 2) {
+        const moveNum = Math.floor(i / 2) + 1;
+        const w = movesArray[i] || '';
+        const b = movesArray[i + 1] || '';
+        const row = document.createElement('div');
+        row.className = 'moveRow';
+        row.innerHTML = `<strong>${moveNum}.</strong> ${w} ${b ? `&nbsp;&nbsp;${b}` : ''}`;
+        movesEl.appendChild(row);
+    }
+    movesEl.scrollTop = movesEl.scrollHeight;
+}
+
+function updateInfo() {
+    infoEl.innerHTML = `<div>Game ID: <strong>${gameId || '-'}</strong></div><div>Your color: <strong>${playerColor === 'w' ? 'White' : 'Black'}</strong></div>`;
+}
+
+function formatTime(t) {
+  const time = Math.max(0, Math.round(t));
+  const m = Math.floor(time / 60).toString().padStart(2, '0');
+  const s = (time % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+function handleClock(data) {
+    if (clockInterval) clearInterval(clockInterval);
+    if ((data.inc === 0 && data.time.w === 0) || isGameOver) {
+        whiteClockEl.innerText = (data.inc === 0 && data.time.w === 0) ? '∞' : formatTime(data.time.w);
+        blackClockEl.innerText = (data.inc === 0 && data.time.w === 0) ? '∞' : formatTime(data.time.b);
+        return;
+    }
+    const tick = () => {
+        const now = Date.now();
+        const elapsed = (now - data.lastMoveTs) / 1000;
+        let whiteTime = data.time.w, blackTime = data.time.b;
+        if (!isGameOver) {
+            if (game.turn() === 'w') whiteTime -= elapsed; else blackTime -= elapsed;
+        }
+        whiteClockEl.innerText = formatTime(whiteTime);
+        blackClockEl.innerText = formatTime(blackTime);
+        if ((whiteTime <= 0 || blackTime <= 0) && !isGameOver) {
+            isGameOver = true;
+            if (gameRef) gameRef.update({ status: 'timeout' });
+            updateStatus({ status: 'timeout' });
+            clearInterval(clockInterval);
+        }
+    };
+    tick();
+    if (!isGameOver) { clockInterval = setInterval(tick, 500); }
+}
+
+function toggleControls(gameInProgress) {
+    newGameBtn.disabled = gameInProgress;
+    joinBtn.disabled = gameInProgress;
+    colorSelect.disabled = gameInProgress;
+    timePreset.disabled = gameInProgress;
+}
+
+function removeHighlights() {
+    document.querySelectorAll('#chessboardContainer .square-55d63').forEach(el => el.classList.remove('highlight-last-move'));
+}
+
+function highlightLastMove() {
+    removeHighlights();
+    const history = game.history({ verbose: true });
+    if (history.length === 0) return;
+    const lastMove = history[history.length - 1];
+    document.querySelector(`.square-${lastMove.from}`).classList.add('highlight-last-move');
+    document.querySelector(`.square-${lastMove.to}`).classList.add('highlight-last-move');
+}
+
+function showLegalMoves(square) {
+    clearLegalMoves();
+    const moves = game.moves({ square: square, verbose: true });
+    if (moves.length === 0) return;
+    moves.forEach(move => {
+        const hint = document.createElement('div');
+        hint.classList.add('legal-move-hint');
+        document.querySelector(`.square-${move.to}`).appendChild(hint);
+    });
+}
+
+function clearLegalMoves() {
+    document.querySelectorAll('.legal-move-hint').forEach(hint => hint.remove());
+}
+
+newGameBtn.addEventListener('click', createNewGame);
+joinBtn.addEventListener('click', () => {
+  const id = prompt("Paste Game ID or the full game link:");
+  if (id) {
+    const parsedId = id.includes('#') ? id.split('#').pop() : id;
+    joinExistingGame(parsedId);
+  }
+});
+copyLinkBtn.addEventListener('click', () => {
+  if (gameLinkInput.value) {
+    navigator.clipboard.writeText(gameLinkInput.value).then(() => alert('Link copied!'));
+  }
+});
+exportPgnBtn.addEventListener('click', async () => {
+  if (!gameRef) return alert('No active game to export.');
+  const snap = await gameRef.once('value');
+  const pgn = snap.val().pgn;
+  const blob = new Blob([pgn], { type: 'application/x-chess-pgn' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `game_${gameId}.pgn`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+function setURLHash(id) {
+  const url = `${window.location.href.split('#')[0]}#${id}`;
+  gameLinkInput.value = url;
+  window.location.hash = id;
+}
+
+window.addEventListener('beforeunload', () => {
+  if (gameRef) gameRef.off();
+  if (clockInterval) clearInterval(clockInterval);
+});
+
+if (window.location.hash) {
+  const id = window.location.hash.substring(1);
+  if (id) joinExistingGame(id);
+}
+
+initBoard();
+</script>
+
+</body>
+</html>
